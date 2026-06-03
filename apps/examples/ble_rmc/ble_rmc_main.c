@@ -746,6 +746,273 @@ int ble_rmc_main(int argc, char *argv[])
 			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 	}
 
+	/*
+	 * [ LWNL direct-pointer API test ] Usage :
+	 * TASH>> ble_rmc srvconfig          - re-apply server GATT config (tests set_server_config)
+	 * TASH>> ble_rmc devname MyDevice   - set GAP device name
+	 * TASH>> ble_rmc profile            - get GATT profile count
+	 * TASH>> ble_rmc connlist           - list connected client handles
+	 * TASH>> ble_rmc active any         - check if any connection is active
+	 * TASH>> ble_rmc active <handle>    - check if conn_handle is active
+	 * TASH>> ble_rmc advint <interval>  - set legacy adv interval
+	 */
+	if (strncmp(argv[1], "srvconfig", 10) == 0) {
+		ret = ble_manager_set_server_config(&server_config);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_SERVER_TAG, "set server config fail[%d]\n", ret);
+			goto ble_rmc_done;
+		}
+		RMC_LOG(RMC_SERVER_TAG, "set server config ... ok\n");
+	}
+
+	if (strncmp(argv[1], "devname", 8) == 0) {
+		if (argc < 3) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc devname <name>\n");
+			goto ble_rmc_done;
+		}
+		memset(g_rmc_device_name, 0, sizeof(g_rmc_device_name));
+		strncpy(g_rmc_device_name, argv[2], BLE_GAP_DEVICE_NAME_LEN - 1);
+		ret = ble_manager_set_gap_device_name(g_rmc_device_name);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "set device name fail[%d]\n", ret);
+			goto ble_rmc_done;
+		}
+		RMC_LOG(RMC_TAG, "set device name [%s] ... ok\n", g_rmc_device_name);
+	}
+
+	if (strncmp(argv[1], "profile", 8) == 0) {
+		g_rmc_profile_count = 0;
+		ret = ble_server_get_profile_count(&g_rmc_profile_count);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_SERVER_TAG, "get profile count fail[%d]\n", ret);
+			goto ble_rmc_done;
+		}
+		RMC_LOG(RMC_SERVER_TAG, "profile count : %u\n", g_rmc_profile_count);
+	}
+
+	if (strncmp(argv[1], "connlist", 9) == 0) {
+		int i;
+
+		memset(&g_rmc_conn_list, 0, sizeof(g_rmc_conn_list));
+		ret = ble_client_connected_device_list(&g_rmc_conn_list);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_CLIENT_TAG, "connected device list fail[%d]\n", ret);
+			goto ble_rmc_done;
+		}
+		RMC_LOG(RMC_CLIENT_TAG, "connected count : %u\n", g_rmc_conn_list.connected_count);
+		for (i = 0; i < g_rmc_conn_list.connected_count; i++) {
+			RMC_LOG(RMC_CLIENT_TAG, "  handle[%d] : %u\n", i, g_rmc_conn_list.conn_handle[i]);
+		}
+	}
+
+	if (strncmp(argv[1], "active", 7) == 0) {
+		if (argc < 3) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc active any | ble_rmc active <handle>\n");
+			goto ble_rmc_done;
+		}
+		g_rmc_is_active = false;
+		if (strncmp(argv[2], "any", 4) == 0) {
+			ret = ble_manager_conn_is_any_active(&g_rmc_is_active);
+		} else {
+			ble_conn_handle conn_handle = (ble_conn_handle)atoi(argv[2]);
+			ret = ble_manager_conn_is_active(conn_handle, &g_rmc_is_active);
+		}
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_CLIENT_TAG, "conn is active check fail[%d]\n", ret);
+			goto ble_rmc_done;
+		}
+		RMC_LOG(RMC_CLIENT_TAG, "is_active : %s\n", g_rmc_is_active ? "true" : "false");
+	}
+
+	/*
+	* [ Operation APIs Test Commands ] Usage :
+	* These commands test operation functions that may fail in protected builds
+	* Note: Requires an active BLE connection (use 'connect' or 'reconn' first)
+	*
+	* TASH>> ble_rmc enot <conn_id> <attr>    - enable notification
+	* TASH>> ble_rmc eind <conn_id> <attr>    - enable indication
+	* TASH>> ble_rmc enoti <conn_id> <attr>   - enable notification + indication
+	* TASH>> ble_rmc opread <conn_id> <attr>  - operation read
+	* TASH>> ble_rmc opwrite <conn_id> <attr> <hexdata> - operation write
+	* TASH>> ble_rmc opwnr <conn_id> <attr> <hexdata> - write without response
+	* TASH>> ble_rmc pendcnt <conn_id>        - get pending read/write count
+	*/
+
+	if (strncmp(argv[1], "enot", 5) == 0) {
+		if (argc < 4) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc enot <conn_id> <attr_handle>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		ble_attr_handle attr = (ble_attr_handle)strtol(argv[3], NULL, 16);
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		ret = ble_client_operation_enable_notification(ctx_list[id], attr);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "enable notification fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "enable notification OK (attr=0x%x)\n", attr);
+		}
+	}
+
+	if (strncmp(argv[1], "eind", 5) == 0) {
+		if (argc < 4) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc eind <conn_id> <attr_handle>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		ble_attr_handle attr = (ble_attr_handle)strtol(argv[3], NULL, 16);
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		ret = ble_client_operation_enable_indication(ctx_list[id], attr);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "enable indication fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "enable indication OK (attr=0x%x)\n", attr);
+		}
+	}
+
+	if (strncmp(argv[1], "enoti", 6) == 0) {
+		if (argc < 4) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc enoti <conn_id> <attr_handle>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		ble_attr_handle attr = (ble_attr_handle)strtol(argv[3], NULL, 16);
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		ret = ble_client_operation_enable_notification_and_indication(ctx_list[id], attr);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "enable noti+indi fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "enable notification+indication OK (attr=0x%x)\n", attr);
+		}
+	}
+
+	if (strncmp(argv[1], "opread", 7) == 0) {
+		if (argc < 4) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc opread <conn_id> <attr_handle>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		ble_attr_handle attr = (ble_attr_handle)strtol(argv[3], NULL, 16);
+		ble_data data = { 0, };
+		uint8_t read_buf[512] = { 0, };
+		data.data = read_buf;
+		data.length = sizeof(read_buf);
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		ret = ble_client_operation_read(ctx_list[id], attr, &data);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "operation read fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "operation read OK (attr=0x%x, len=%d)\n", attr, data.length);
+		}
+	}
+
+	if (strncmp(argv[1], "opwrite", 8) == 0) {
+		if (argc < 5) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc opwrite <conn_id> <attr_handle> <hexdata>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		ble_attr_handle attr = (ble_attr_handle)strtol(argv[3], NULL, 16);
+		ble_data data = { 0, };
+		static uint8_t write_buf[512];
+		int len = strlen(argv[4]) / 2;
+		if (len > 512) len = 512;
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		for (int i = 0; i < len; i++) {
+			char byte_str[3] = { argv[4][i*2], argv[4][i*2+1], 0 };
+			write_buf[i] = (uint8_t)strtol(byte_str, NULL, 16);
+		}
+
+		data.data = write_buf;
+		data.length = len;
+
+		ret = ble_client_operation_write(ctx_list[id], attr, &data);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "operation write fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "operation write OK (attr=0x%x, len=%d)\n", attr, len);
+		}
+	}
+
+	if (strncmp(argv[1], "opwnr", 6) == 0) {
+		if (argc < 5) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc opwnr <conn_id> <attr_handle> <hexdata>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		ble_attr_handle attr = (ble_attr_handle)strtol(argv[3], NULL, 16);
+		ble_data data = { 0, };
+		static uint8_t write_buf[512];
+		int len = strlen(argv[4]) / 2;
+		if (len > 512) len = 512;
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		for (int i = 0; i < len; i++) {
+			char byte_str[3] = { argv[4][i*2], argv[4][i*2+1], 0 };
+			write_buf[i] = (uint8_t)strtol(byte_str, NULL, 16);
+		}
+
+		data.data = write_buf;
+		data.length = len;
+
+		ret = ble_client_operation_write_no_response(ctx_list[id], attr, &data);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "operation write no response fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "operation write no response OK (attr=0x%x, len=%d)\n", attr, len);
+		}
+	}
+
+	if (strncmp(argv[1], "pendcnt", 8) == 0) {
+		if (argc < 3) {
+			RMC_LOG(RMC_TAG, "Usage: ble_rmc pendcnt <conn_id>\n");
+			goto ble_rmc_done;
+		}
+		int id = atoi(argv[2]);
+		uint8_t count = 0;
+
+		if (ctx_list[id] == NULL) {
+			RMC_LOG(RMC_TAG, "Invalid connection ID\n");
+			goto ble_rmc_done;
+		}
+
+		ret = ble_client_get_write_read_pending_count(ctx_list[id], &count);
+		if (ret != BLE_MANAGER_SUCCESS) {
+			RMC_LOG(RMC_TAG, "get pending count fail[%d]\n", ret);
+		} else {
+			RMC_LOG(RMC_TAG, "pending count = %d\n", count);
+		}
+	}
+
 	if (strncmp(argv[1], "whitelist", 10) == 0) {
 		if (argc == 4 && strncmp(argv[2], "add", 4) == 0) {
 			ble_addr addr[1] = { 0, };
@@ -1146,6 +1413,17 @@ int ble_rmc_main(int argc, char *argv[])
 			memcpy(addr_info.mac, addrr, BLE_BD_ADDR_MAX_LEN);
 			addr_info.type = addr_type;
 			ble_server_set_adv_type(adv_type, &addr_info);
+		}
+
+		if (argc == 4 && strncmp(argv[2], "advint", 7) == 0) {
+			unsigned int interval = (unsigned int)atoi(argv[3]);
+			
+			ret = ble_server_set_adv_interval(interval);
+			if (ret != BLE_MANAGER_SUCCESS) {
+				RMC_LOG(RMC_SERVER_TAG, "set adv interval fail[%d]\n", ret);
+			} else {
+				RMC_LOG(RMC_SERVER_TAG, "set adv interval OK (interval=%d)\n", interval);
+			}
 		}
 
 		if (argc == 3 && strncmp(argv[2], "start", 6) == 0) {
